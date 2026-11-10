@@ -1,0 +1,6 @@
+{
+  "name": "DpiTunnel",
+  "description": "Multi-tunneling VPN with custom packet obfuscation to bypass Deep Packet Inspection (DPI)",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
