@@ -30,6 +30,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.data.TunnelRepository
 import com.example.model.VpnStatus
 import com.example.ui.AppTab
 import com.example.ui.MainViewModel
@@ -42,6 +43,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        TunnelRepository.initialize(applicationContext)
         enableEdgeToEdge()
 
         setContent {
@@ -222,7 +224,7 @@ class MainActivity : ComponentActivity() {
                                     }
                                 }
                             }
-                            Divider(color = CyberCardBorder)
+                            HorizontalDivider(color = CyberCardBorder)
                         }
                     },
                     bottomBar = {

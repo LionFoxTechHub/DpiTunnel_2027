@@ -10,6 +10,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.AltRoute
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -101,7 +102,7 @@ fun HomeScreen(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    FeaturePill(icon = Icons.Default.AltRoute, label = "Multi-tunneling")
+                    FeaturePill(icon = Icons.AutoMirrored.Filled.AltRoute, label = "Multi-tunneling")
                     FeaturePill(icon = Icons.Default.CloudQueue, label = "DPI Obfuscated")
                     FeaturePill(icon = Icons.Default.Code, label = "Custom Tweaks")
                 }

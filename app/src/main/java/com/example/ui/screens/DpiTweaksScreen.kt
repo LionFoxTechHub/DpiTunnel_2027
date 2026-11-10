@@ -528,7 +528,7 @@ fun DpiTweaksScreen(
                     )
                 }
 
-                Divider(color = CyberCardBorder)
+                HorizontalDivider(color = CyberCardBorder)
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),

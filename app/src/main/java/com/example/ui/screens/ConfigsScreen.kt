@@ -586,7 +586,7 @@ private fun AddEditConfigDialog(
                     )
                 }
 
-                Divider(color = CyberCardBorder)
+                HorizontalDivider(color = CyberCardBorder)
                 Text("DPI Obfuscation Settings", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = NeonAmber)
 
                 OutlinedTextField(

@@ -6,8 +6,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import java.io.IOException
 import java.net.InetSocketAddress
 import java.net.Socket
+import java.net.SocketTimeoutException
+import java.net.UnknownHostException
 import java.util.concurrent.TimeUnit
 
 data class FragmentationPlan(
@@ -24,6 +27,7 @@ data class DpiProbeResult(
     val isDohSuccessful: Boolean,
     val handshakeLatencyMs: Long,
     val sniFilteringDetected: Boolean,
+    val errorMessage: String? = null,
     val recommendedTweak: String,
     val diagnosticSummary: String
 )
@@ -69,7 +73,6 @@ object DpiObfuscationEngine {
                 )
             }
             TcpFragmentMode.SPLIT_AT_SNI -> {
-                // Typical TLS 1.3 ClientHello has SNI extension located around byte 42-48
                 val estimatedSniOffset = 44 + (sniDomain.length / 2).coerceAtMost(30)
                 FragmentationPlan(
                     mode = mode,
@@ -111,13 +114,12 @@ object DpiObfuscationEngine {
             val response = httpClient.newCall(request).execute()
             if (response.isSuccessful) {
                 val body = response.body?.string() ?: return@withContext null
-                // Extract IP from json response "data":"x.x.x.x"
                 val regex = """"data"\s*:\s*"([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+)"""".toRegex()
                 val match = regex.find(body)
                 return@withContext match?.groupValues?.get(1)
             }
         } catch (_: Exception) {
-            // fallback
+            // Do not fabricate IP
         }
         null
     }
@@ -130,12 +132,12 @@ object DpiObfuscationEngine {
     ): DpiProbeResult = withContext(Dispatchers.IO) {
         onProgress("Resolving host via Encrypted DNS (${tweak.dohProvider.displayName})...")
         val resolvedIp = resolveDoH(targetHost, tweak.dohProvider.endpoint)
-            ?: resolveDoH(targetHost, "https://cloudflare-dns.com/dns-query")
 
         onProgress("Testing TCP Handshake with ${tweak.tcpFragmentMode.label}...")
         val startTime = System.currentTimeMillis()
-        var handshakeLatency = 0L
+        var handshakeLatency = -1L
         var connectionSucceeded = false
+        var failureReason: String? = null
 
         try {
             val destination = resolvedIp ?: targetHost
@@ -145,32 +147,39 @@ object DpiObfuscationEngine {
                 handshakeLatency = System.currentTimeMillis() - startTime
                 connectionSucceeded = true
             }
-        } catch (_: Exception) {
-            handshakeLatency = System.currentTimeMillis() - startTime
+        } catch (e: UnknownHostException) {
+            failureReason = "DNS resolution failure: Unknown host '$targetHost'"
+        } catch (e: SocketTimeoutException) {
+            failureReason = "Handshake timed out after 3500ms to $targetHost:$targetPort"
+        } catch (e: IOException) {
+            failureReason = "TCP connection refused or reset: ${e.message}"
+        } catch (e: Exception) {
+            failureReason = "Probe error: ${e.message}"
         }
 
         onProgress("Analyzing DPI Evasion Profile...")
         val plan = calculateFragmentationPlan(tweak.sniHost, tweak.tcpFragmentMode, tweak.fragmentDelayMs)
 
-        val sniFiltering = !connectionSucceeded && handshakeLatency > 2000
+        val sniFiltering = !connectionSucceeded && failureReason != null
         val summary = if (connectionSucceeded) {
-            "DPI Bypass Successful! Handshake completed in ${handshakeLatency}ms. Obfuscation [${plan.mode.label}] evaded local ISP DPI filters."
+            "Probe Succeeded: Handshake completed in ${handshakeLatency}ms. Protocol obfuscation verified active."
         } else {
-            "Direct TCP probe blocked or filtered by firewall. Recommendation: Enable 'Split at SNI' + Fake HTTP Request with SNI Bug Host '${tweak.sniHost}'."
+            "Probe Failed: $failureReason. Possible ISP DPI reset or packet drop."
         }
 
-        val recommendedTweak = if (sniFiltering) {
-            "Switch to 'Split at SNI' + 15ms fragment delay with Cloudflare fronting."
+        val recommendedTweak = if (!connectionSucceeded) {
+            "Recommendation: Enable 'Split at SNI' with 15ms fragment delay and verify server port $targetPort is open."
         } else {
-            "Current setup is optimal for ${tweak.dohProvider.displayName}."
+            "Current transport parameters are optimal for ${tweak.dohProvider.displayName}."
         }
 
         DpiProbeResult(
             targetHost = targetHost,
-            dohResolvedIp = resolvedIp ?: "104.21.58.12",
+            dohResolvedIp = resolvedIp,
             isDohSuccessful = resolvedIp != null,
-            handshakeLatencyMs = if (connectionSucceeded) handshakeLatency else 45L,
+            handshakeLatencyMs = handshakeLatency,
             sniFilteringDetected = sniFiltering,
+            errorMessage = failureReason,
             recommendedTweak = recommendedTweak,
             diagnosticSummary = summary
         )

@@ -1,12 +1,15 @@
 package com.example.data
 
+import android.content.Context
 import com.example.model.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
+import org.json.JSONArray
 import org.json.JSONObject
+import java.io.File
 import java.net.InetSocketAddress
 import java.net.Socket
 import java.net.URI
@@ -24,7 +27,7 @@ object TunnelRepository {
             uuidOrPassword = "7f2a1b9c-48d1-4ef3-9c02-e251a7e49121",
             countryCode = "DE",
             cityName = "Frankfurt",
-            pingMs = 42,
+            pingMs = -1,
             dpiTweak = DpiTweakSettings(
                 sniHost = "speedtest.net",
                 tcpFragmentMode = TcpFragmentMode.SPLIT_AT_SNI,
@@ -40,7 +43,7 @@ object TunnelRepository {
             uuidOrPassword = "98a1c243-7bb2-4110-85f0-cc2019488a0b",
             countryCode = "SG",
             cityName = "Singapore",
-            pingMs = 68,
+            pingMs = -1,
             dpiTweak = DpiTweakSettings(
                 sniHost = "cloudflare.com",
                 tcpFragmentMode = TcpFragmentMode.DELAYED_SPLIT,
@@ -56,7 +59,7 @@ object TunnelRepository {
             uuidOrPassword = "chacha20-ietf-poly1305:DpiSecretKey2026",
             countryCode = "JP",
             cityName = "Tokyo",
-            pingMs = 85,
+            pingMs = -1,
             dpiTweak = DpiTweakSettings(
                 sniHost = "zoom.us",
                 tcpFragmentMode = TcpFragmentMode.TWO_BYTE_CHUNKS
@@ -71,7 +74,7 @@ object TunnelRepository {
             uuidOrPassword = "pass_dpi_trojan_secure_99",
             countryCode = "GB",
             cityName = "London",
-            pingMs = 38,
+            pingMs = -1,
             dpiTweak = DpiTweakSettings(
                 sniHost = "microsoft.com",
                 tcpFragmentMode = TcpFragmentMode.SPLIT_AT_SNI
@@ -86,7 +89,7 @@ object TunnelRepository {
             uuidOrPassword = "auth_hy2_ultra_speed",
             countryCode = "US",
             cityName = "Ashburn",
-            pingMs = 95,
+            pingMs = -1,
             dpiTweak = DpiTweakSettings(
                 quicJunkPadding = true,
                 badChecksumEvasion = true
@@ -101,7 +104,7 @@ object TunnelRepository {
             uuidOrPassword = "hy1_auth_amsterdam",
             countryCode = "NL",
             cityName = "Amsterdam",
-            pingMs = 46
+            pingMs = -1
         ),
         TunnelProfile(
             id = "cfg-wg-ch",
@@ -112,7 +115,7 @@ object TunnelRepository {
             uuidOrPassword = "wg_pub_key_obfuscated_amnezia_padding",
             countryCode = "CH",
             cityName = "Zurich",
-            pingMs = 40,
+            pingMs = -1,
             dpiTweak = DpiTweakSettings(
                 quicJunkPadding = true
             )
@@ -126,7 +129,7 @@ object TunnelRepository {
             uuidOrPassword = "root:DpiTunnelSsh2026",
             countryCode = "AU",
             cityName = "Sydney",
-            pingMs = 155,
+            pingMs = -1,
             dpiTweak = DpiTweakSettings(
                 sniHost = "freefiremobile.com",
                 fakeHttpRequest = true,
@@ -142,7 +145,7 @@ object TunnelRepository {
             uuidOrPassword = "ovpn_xor_scramble_key",
             countryCode = "FR",
             cityName = "Paris",
-            pingMs = 35
+            pingMs = -1
         ),
         TunnelProfile(
             id = "cfg-dns-kr",
@@ -153,7 +156,7 @@ object TunnelRepository {
             uuidOrPassword = "ns1.dpitunnel.net",
             countryCode = "KR",
             cityName = "Seoul",
-            pingMs = 120
+            pingMs = -1
         ),
         TunnelProfile(
             id = "cfg-http-us",
@@ -164,7 +167,7 @@ object TunnelRepository {
             uuidOrPassword = "",
             countryCode = "US",
             cityName = "New York",
-            pingMs = 88,
+            pingMs = -1,
             dpiTweak = DpiTweakSettings(
                 sniHost = "cloudflare.com",
                 fakeHttpRequest = true,
@@ -180,7 +183,7 @@ object TunnelRepository {
             uuidOrPassword = "user:sockspass2026",
             countryCode = "SE",
             cityName = "Stockholm",
-            pingMs = 52
+            pingMs = -1
         ),
         TunnelProfile(
             id = "cfg-v2ray-hk",
@@ -191,7 +194,7 @@ object TunnelRepository {
             uuidOrPassword = "55a1d019-3e54-4a21-9988-cb94017ba3f8",
             countryCode = "HK",
             cityName = "Hong Kong",
-            pingMs = 74,
+            pingMs = -1,
             dpiTweak = DpiTweakSettings(
                 sniHost = "fast.com",
                 tcpFragmentMode = TcpFragmentMode.SPLIT_AT_SNI
@@ -205,6 +208,13 @@ object TunnelRepository {
     private val _selectedProfile = MutableStateFlow<TunnelProfile>(defaultProfiles.first())
     val selectedProfile: StateFlow<TunnelProfile> = _selectedProfile.asStateFlow()
 
+    private var storageContext: Context? = null
+
+    fun initialize(context: Context) {
+        storageContext = context.applicationContext
+        loadFromDisk()
+    }
+
     fun selectProfile(profile: TunnelProfile) {
         _selectedProfile.value = profile
     }
@@ -212,6 +222,7 @@ object TunnelRepository {
     fun addCustomProfile(profile: TunnelProfile) {
         _profiles.value = listOf(profile) + _profiles.value
         _selectedProfile.value = profile
+        persistToDisk()
     }
 
     fun updateProfile(updated: TunnelProfile) {
@@ -219,6 +230,7 @@ object TunnelRepository {
         if (_selectedProfile.value.id == updated.id) {
             _selectedProfile.value = updated
         }
+        persistToDisk()
     }
 
     fun deleteProfile(id: String) {
@@ -226,12 +238,14 @@ object TunnelRepository {
         if (_selectedProfile.value.id == id && _profiles.value.isNotEmpty()) {
             _selectedProfile.value = _profiles.value.first()
         }
+        persistToDisk()
     }
 
     fun toggleFavorite(id: String) {
         _profiles.value = _profiles.value.map {
             if (it.id == id) it.copy(isFavorite = !it.isFavorite) else it
         }
+        persistToDisk()
     }
 
     suspend fun pingProfile(profile: TunnelProfile): Int = withContext(Dispatchers.IO) {
@@ -244,14 +258,8 @@ object TunnelRepository {
                 latency = (System.currentTimeMillis() - start).toInt()
             }
         } catch (_: Exception) {
-            // Simulated realistic ping between 28ms and 140ms based on country if host is placeholder
-            latency = when (profile.countryCode) {
-                "DE", "FR", "GB", "NL" -> (25..55).random()
-                "US" -> (70..110).random()
-                "SG", "HK", "JP" -> (65..120).random()
-                "AU" -> (140..190).random()
-                else -> (40..130).random()
-            }
+            // Actual measurement: -1 when unreachable
+            latency = -1
         }
         updateProfile(profile.copy(pingMs = latency))
         latency
@@ -265,6 +273,49 @@ object TunnelRepository {
         }
     }
 
+    private fun persistToDisk() {
+        val context = storageContext ?: return
+        try {
+            val file = File(context.filesDir, "tunnel_profiles.json")
+            val array = JSONArray()
+            _profiles.value.forEach { profile ->
+                val obj = JSONObject(exportConfigToJson(profile))
+                obj.put("id", profile.id)
+                obj.put("isCustom", profile.isCustom)
+                obj.put("isFavorite", profile.isFavorite)
+                array.put(obj)
+            }
+            file.writeText(array.toString(2))
+        } catch (_: Exception) {}
+    }
+
+    private fun loadFromDisk() {
+        val context = storageContext ?: return
+        try {
+            val file = File(context.filesDir, "tunnel_profiles.json")
+            if (!file.exists()) return
+            val text = file.readText()
+            val array = JSONArray(text)
+            val loaded = mutableListOf<TunnelProfile>()
+            for (i in 0 until array.length()) {
+                val obj = array.getJSONObject(i)
+                val profile = importConfigFromString(obj.toString())
+                if (profile != null) {
+                    val fullProfile = profile.copy(
+                        id = obj.optString("id", profile.id),
+                        isCustom = obj.optBoolean("isCustom", true),
+                        isFavorite = obj.optBoolean("isFavorite", false)
+                    )
+                    loaded.add(fullProfile)
+                }
+            }
+            if (loaded.isNotEmpty()) {
+                _profiles.value = loaded
+                _selectedProfile.value = loaded.first()
+            }
+        } catch (_: Exception) {}
+    }
+
     fun importConfigFromString(rawText: String): TunnelProfile? {
         val text = rawText.trim()
         try {
@@ -275,7 +326,7 @@ object TunnelRepository {
                     ?: TunnelProtocol.VLESS
 
                 return TunnelProfile(
-                    id = UUID.randomUUID().toString(),
+                    id = json.optString("id", UUID.randomUUID().toString()),
                     name = json.optString("name", "Imported ${protocol.displayName}"),
                     protocol = protocol,
                     serverHost = json.optString("serverHost", "127.0.0.1"),
@@ -334,6 +385,7 @@ object TunnelRepository {
 
     fun exportConfigToJson(profile: TunnelProfile): String {
         val json = JSONObject()
+        json.put("id", profile.id)
         json.put("name", profile.name)
         json.put("protocol", profile.protocol.name)
         json.put("serverHost", profile.serverHost)

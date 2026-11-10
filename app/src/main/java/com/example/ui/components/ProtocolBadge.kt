@@ -6,6 +6,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.AltRoute
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -34,7 +35,7 @@ fun ProtocolBadge(
         TunnelProtocol.VLESS -> Icons.Default.Cyclone
         TunnelProtocol.VMESS -> Icons.Default.Waves
         TunnelProtocol.SHADOWSOCKS -> Icons.Default.Shield
-        TunnelProtocol.SOCKS -> Icons.Default.AltRoute
+        TunnelProtocol.SOCKS -> Icons.AutoMirrored.Filled.AltRoute
         TunnelProtocol.HTTP -> Icons.Default.Language
         TunnelProtocol.TROJAN -> Icons.Default.Security
         TunnelProtocol.HYSTERIA1 -> Icons.Default.Bolt
@@ -75,10 +76,10 @@ fun ProtocolBadge(
             )
         }
         Text(
-            text = protocol.displayName,
+            text = if (protocol.phaseStatus.isPhase1Active) protocol.displayName else "${protocol.displayName} (P2)",
             fontSize = 12.sp,
             fontWeight = FontWeight.SemiBold,
-            color = if (isSelected) protocol.badgeColor else Color(0xFFE2E8F0)
+            color = if (isSelected) protocol.badgeColor else if (!protocol.phaseStatus.isPhase1Active) Color(0xFF94A3B8) else Color(0xFFE2E8F0)
         )
     }
 }

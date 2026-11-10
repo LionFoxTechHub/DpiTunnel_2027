@@ -88,7 +88,7 @@ fun SettingsScreen(
                     )
                 }
 
-                Divider(color = CyberCardBorder)
+                HorizontalDivider(color = CyberCardBorder)
 
                 // Auto reconnect
                 Row(
@@ -107,7 +107,7 @@ fun SettingsScreen(
                     )
                 }
 
-                Divider(color = CyberCardBorder)
+                HorizontalDivider(color = CyberCardBorder)
 
                 // IPv6
                 Row(
@@ -165,7 +165,7 @@ fun SettingsScreen(
                     )
                 }
 
-                Divider(color = CyberCardBorder)
+                HorizontalDivider(color = CyberCardBorder)
 
                 // Fallback DNS
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -217,7 +217,7 @@ fun SettingsScreen(
                     }
                 }
 
-                Divider(color = CyberCardBorder)
+                HorizontalDivider(color = CyberCardBorder)
 
                 Text(
                     text = "Engineering by LionFox Tech. Built with high-performance traffic obfuscation mechanisms specifically designed to bypass aggressive Deep Packet Inspection firewalls, stateful SNI filters, and QoS bandwidth throttling.",

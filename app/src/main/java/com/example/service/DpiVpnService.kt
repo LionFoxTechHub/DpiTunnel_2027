@@ -6,6 +6,10 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
+import android.net.NetworkRequest
 import android.net.VpnService
 import android.os.Build
 import android.os.ParcelFileDescriptor
@@ -13,36 +17,66 @@ import androidx.core.app.NotificationCompat
 import com.example.MainActivity
 import com.example.R
 import com.example.data.TunnelRepository
-import com.example.engine.DpiObfuscationEngine
 import com.example.model.*
+import com.example.tunnel.SocketProtector
+import com.example.tunnel.TunnelOrchestrator
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import java.io.FileInputStream
-import java.io.FileOutputStream
 import java.io.IOException
-import java.net.InetSocketAddress
+import java.net.DatagramSocket
 import java.net.Socket
-import java.nio.ByteBuffer
 
-/**
- * Core VpnService for DpiTunnel.
- * Establishes and manages the virtual TUN interface, routes all device IP traffic,
- * applies custom DPI obfuscation (SNI spoofing, packet fragmentation, payload injection),
- * and provides live upload/download speed and packet telemetry.
- */
-class DpiVpnService : VpnService() {
+class DpiVpnService : VpnService(), SocketProtector {
 
     private val serviceJob = SupervisorJob()
-    private val serviceScope = CoroutineScope(Dispatchers.IO + serviceJob)
+    private val serviceScope = CoroutineScope(Dispatchers.Main + serviceJob)
     private var vpnInterface: ParcelFileDescriptor? = null
     private var isRunning = false
-    private var tunnelSocket: Socket? = null
+
+    private lateinit var orchestrator: TunnelOrchestrator
+    private var connectivityManager: ConnectivityManager? = null
+    private var networkCallback: ConnectivityManager.NetworkCallback? = null
+
+    override fun protect(socket: Socket): Boolean = super.protect(socket)
+    override fun protect(socket: DatagramSocket): Boolean = super.protect(socket)
+    override fun protect(socketFd: Int): Boolean = super.protect(socketFd)
 
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
+
+        orchestrator = TunnelOrchestrator(
+            socketProtector = this,
+            onStateChanged = { newState ->
+                _vpnState.value = newState
+            },
+            onNotificationUpdateNeeded = { statusText, profile ->
+                val notifManager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
+                notifManager.notify(NOTIFICATION_ID, buildNotification(statusText, profile))
+            }
+        )
+
+        setupNetworkMonitoring()
+    }
+
+    private fun setupNetworkMonitoring() {
+        connectivityManager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        networkCallback = object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: Network) {
+                orchestrator.handleNetworkAvailable()
+            }
+
+            override fun onLost(network: Network) {
+                orchestrator.handleNetworkLost()
+            }
+        }
+
+        val request = NetworkRequest.Builder()
+            .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+            .build()
+        connectivityManager?.registerNetworkCallback(request, networkCallback!!)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -62,195 +96,102 @@ class DpiVpnService : VpnService() {
 
     private fun connectTunnel(profile: TunnelProfile) {
         if (isRunning) {
-            disconnectTunnel("Switching to new profile: ${profile.name}")
+            disconnectTunnel("Switching profile to ${profile.name}")
         }
 
         isRunning = true
-        _vpnState.value = _vpnState.value.copy(
-            status = VpnStatus.CONNECTING,
-            activeProfile = profile,
-            connectedDurationSeconds = 0L,
-            downloadSpeedBps = 0L,
-            uploadSpeedBps = 0L,
-            totalDownloadBytes = 0L,
-            totalUploadBytes = 0L,
-            activeObfuscationSummary = "${profile.dpiTweak.tcpFragmentMode.label} [SNI: ${profile.dpiTweak.sniHost}]"
-        )
-
-        startForeground(NOTIFICATION_ID, buildNotification("Initializing DPI Tunnel...", profile))
-        addLog(LogLevel.INFO, "TUNNEL", "Preparing tunnel interface for ${profile.name} (${profile.protocol.displayName})")
+        startForeground(NOTIFICATION_ID, buildNotification("Initializing Tunnel...", profile))
+        addLog(LogLevel.INFO, "VPN_SERVICE", "Starting tunnel pipeline for: ${profile.name} (${profile.protocol.displayName})")
 
         serviceScope.launch {
             try {
-                // 1. Obfuscation Pipeline Initialization
-                addLog(LogLevel.OBFS, "DPI", "Configuring obfuscation engine:")
-                addLog(LogLevel.OBFS, "DPI", " -> Target Server: ${profile.serverHost}:${profile.serverPort}")
-                addLog(LogLevel.OBFS, "DPI", " -> SNI Camouflage: ${profile.dpiTweak.sniHost}")
-                addLog(LogLevel.OBFS, "DPI", " -> TCP Mode: ${profile.dpiTweak.tcpFragmentMode.label}")
-                addLog(LogLevel.OBFS, "DPI", " -> Encrypted DNS: ${profile.dpiTweak.dohProvider.displayName}")
+                val mtu = 1400
+                val enableIpv6 = false
+                val dnsServers = listOf("1.1.1.1", "8.8.8.8")
 
-                if (profile.dpiTweak.fakeHttpRequest) {
-                    val expanded = DpiObfuscationEngine.expandPayload(
-                        profile.dpiTweak.httpPayload,
-                        profile.serverHost,
-                        profile.serverPort,
-                        profile.dpiTweak.customUserAgent
-                    )
-                    addLog(LogLevel.OBFS, "PAYLOAD", "Injected HTTP Request header:\n${expanded.trim()}")
-                }
-
-                _vpnState.value = _vpnState.value.copy(status = VpnStatus.TUNNELING)
-                delay(400)
-
-                // 2. Calculate TCP Handshake Fragmentation Plan
-                val plan = DpiObfuscationEngine.calculateFragmentationPlan(
-                    profile.dpiTweak.sniHost,
-                    profile.dpiTweak.tcpFragmentMode,
-                    profile.dpiTweak.fragmentDelayMs
-                )
-                addLog(LogLevel.OBFS, "FRAGMENT", plan.explanation)
-
-                // 3. Establish and Protect Tunnel Socket
-                try {
-                    val socket = Socket()
-                    val protected = protect(socket)
-                    if (protected) {
-                        addLog(LogLevel.INFO, "SOCKET", "Outbound tunnel socket protected from VPN loop")
-                    }
-                    tunnelSocket = socket
-                } catch (e: Exception) {
-                    addLog(LogLevel.WARN, "SOCKET", "Socket protection warning: ${e.message}")
-                }
-
-                // 4. Configure Virtual TUN Interface via VpnService.Builder
-                val mtu = 1400 // Optimized MTU for fragmented DPI packets
+                // Build Android TUN Interface
                 val builder = Builder()
                     .setSession("DpiTunnel [${profile.protocol.shortName}]")
                     .addAddress("10.8.0.2", 24)
-                    .addDnsServer("1.1.1.1")
-                    .addDnsServer("8.8.8.8")
-                    .addRoute("0.0.0.0", 0) // Route all IPv4 traffic
+                    .addDnsServer(dnsServers[0])
+                    .addDnsServer(dnsServers[1])
+                    .addRoute("0.0.0.0", 0) // Route all IPv4
                     .setMtu(mtu)
 
-                // Disallow VPN app itself from looping traffic
+                if (enableIpv6) {
+                    builder.addAddress("fd00:10:8::2", 64)
+                    builder.addRoute("::", 0)
+                }
+
+                // Prevent our own app traffic from looping into the TUN interface
                 try {
                     builder.addDisallowedApplication(packageName)
-                } catch (_: Exception) {}
+                } catch (e: Exception) {
+                    addLog(LogLevel.WARN, "VPN_SERVICE", "Could not set disallowed app: ${e.message}")
+                }
 
                 val pfd = builder.establish()
                 if (pfd == null) {
-                    addLog(LogLevel.ERROR, "TUNNEL", "Failed to establish TUN interface (Permission denied or revoked)")
-                    disconnectTunnel("TUN interface error")
+                    val err = "Failed to establish TUN interface (VPN permission may be missing or revoked)"
+                    addLog(LogLevel.ERROR, "VPN_SERVICE", err)
+                    disconnectTunnel(err)
                     return@launch
                 }
                 vpnInterface = pfd
 
-                addLog(LogLevel.INFO, "TUNNEL", "Virtual TUN interface up on 10.8.0.2/24 (MTU=$mtu)")
-                addLog(LogLevel.INFO, "TUNNEL", "Connected to remote gateway: ${profile.serverHost}:${profile.serverPort}")
+                addLog(LogLevel.INFO, "TUN", "Android TUN interface established on fd=${pfd.fd} (MTU=$mtu)")
 
-                _vpnState.value = _vpnState.value.copy(
-                    status = VpnStatus.CONNECTED,
-                    currentVirtualIp = "10.8.0.2",
-                    remoteServerIp = profile.serverHost
+                // Delegate remote connection, real socket protection, and real packet forwarding to Orchestrator
+                val startResult = orchestrator.startTunnel(
+                    profile = profile,
+                    tunFd = pfd,
+                    mtu = mtu,
+                    enableIpv6 = enableIpv6,
+                    dnsServers = dnsServers
                 )
 
-                // 5. Start Packet Processing and Live Telemetry Loop
-                launchPacketProcessing(pfd, profile)
+                if (startResult.isFailure) {
+                    val ex = startResult.exceptionOrNull()
+                    addLog(LogLevel.ERROR, "TUNNEL", "Tunnel failed to connect: ${ex?.message}")
+                    disconnectTunnel("Remote handshake failed: ${ex?.message}")
+                }
 
             } catch (e: Exception) {
-                addLog(LogLevel.ERROR, "TUNNEL", "Tunnel exception: ${e.message}")
+                addLog(LogLevel.ERROR, "VPN_SERVICE", "Fatal error: ${e.message}")
                 disconnectTunnel("Error: ${e.message}")
-            }
-        }
-    }
-
-    private fun CoroutineScope.launchPacketProcessing(pfd: ParcelFileDescriptor, profile: TunnelProfile) {
-        launch(Dispatchers.IO) {
-            val inStream = FileInputStream(pfd.fileDescriptor)
-            val buffer = ByteArray(32768)
-            var seconds = 0L
-            var totalDown = 0L
-            var totalUp = 0L
-
-            // Background worker reading TUN packets
-            launch {
-                try {
-                    while (isActive && isRunning) {
-                        val length = inStream.read(buffer)
-                        if (length > 0) {
-                            totalUp += length
-                        } else if (length < 0) {
-                            break
-                        }
-                    }
-                } catch (_: IOException) {
-                    // Stream closed on disconnect
-                }
-            }
-
-            // Periodic telemetry & notification updater
-            while (isActive && isRunning) {
-                delay(1000)
-                seconds++
-
-                // Realistic active traffic calculation
-                val downSpeed = (920_000L..4_100_000L).random()
-                val upSpeed = (150_000L..820_000L).random()
-                totalDown += downSpeed
-                totalUp += (upSpeed / 2)
-
-                _vpnState.value = _vpnState.value.copy(
-                    connectedDurationSeconds = seconds,
-                    downloadSpeedBps = downSpeed,
-                    uploadSpeedBps = upSpeed,
-                    totalDownloadBytes = totalDown,
-                    totalUploadBytes = totalUp
-                )
-
-                if (seconds % 3 == 0L) {
-                    val notifManager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
-                    notifManager.notify(
-                        NOTIFICATION_ID,
-                        buildNotification("Connected - ↓ ${VpnState.formatSpeed(downSpeed)} ↑ ${VpnState.formatSpeed(upSpeed)}", profile)
-                    )
-                }
-
-                if (seconds % 30 == 0L) {
-                    addLog(LogLevel.INFO, "HEARTBEAT", "Tunnel active. Transferred: ${VpnState.formatBytes(totalDown)} (${totalDown / 1400} pkts). KeepAlive OK.")
-                }
             }
         }
     }
 
     private fun disconnectTunnel(reason: String) {
         isRunning = false
-        try {
-            vpnInterface?.close()
+        serviceScope.launch {
+            orchestrator.stopTunnel(reason)
+            try {
+                vpnInterface?.close()
+            } catch (_: IOException) {}
             vpnInterface = null
-        } catch (_: IOException) {}
 
-        try {
-            tunnelSocket?.close()
-            tunnelSocket = null
-        } catch (_: IOException) {}
+            addLog(LogLevel.WARN, "VPN_SERVICE", "Tunnel terminated ($reason)")
+            _vpnState.value = _vpnState.value.copy(
+                status = VpnStatus.DISCONNECTED,
+                downloadSpeedBps = 0L,
+                uploadSpeedBps = 0L
+            )
 
-        addLog(LogLevel.WARN, "TUNNEL", "Tunnel stopped: $reason")
-        _vpnState.value = _vpnState.value.copy(
-            status = VpnStatus.DISCONNECTED,
-            downloadSpeedBps = 0L,
-            uploadSpeedBps = 0L
-        )
-
-        stopForeground(STOP_FOREGROUND_REMOVE)
-        stopSelf()
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            stopSelf()
+        }
     }
 
     override fun onRevoke() {
-        disconnectTunnel("VPN authorization revoked by Android system")
+        disconnectTunnel("VPN permission revoked by system")
         super.onRevoke()
     }
 
     override fun onDestroy() {
+        networkCallback?.let { connectivityManager?.unregisterNetworkCallback(it) }
+        orchestrator.release()
         disconnectTunnel("Service destroyed")
         serviceJob.cancel()
         super.onDestroy()
@@ -263,11 +204,11 @@ class DpiVpnService : VpnService() {
                 "DpiTunnel Service",
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "Shows live status and speed of DPI obfuscated VPN"
+                description = "Shows live verified status and real throughput of DpiTunnel"
                 setShowBadge(false)
             }
             val manager = getSystemService(NotificationManager::class.java)
-            manager.createNotificationChannel(channel)
+            manager?.createNotificationChannel(channel)
         }
     }
 
