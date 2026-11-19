@@ -24,7 +24,8 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import java.io.IOException
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.net.DatagramSocket
 import java.net.Socket
 
@@ -32,8 +33,8 @@ class DpiVpnService : VpnService(), SocketProtector {
 
     private val serviceJob = SupervisorJob()
     private val serviceScope = CoroutineScope(Dispatchers.Main + serviceJob)
-    private var vpnInterface: ParcelFileDescriptor? = null
-    private var isRunning = false
+    private val lifecycleMutex = Mutex()
+    private var activeConnectJob: Job? = null
 
     private lateinit var orchestrator: TunnelOrchestrator
     private var connectivityManager: ConnectivityManager? = null
@@ -55,7 +56,9 @@ class DpiVpnService : VpnService(), SocketProtector {
             onNotificationUpdateNeeded = { statusText, profile ->
                 val notifManager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
                 notifManager.notify(NOTIFICATION_ID, buildNotification(statusText, profile))
-            }
+            },
+            appContext = applicationContext,
+            workingDirPath = filesDir.absolutePath
         )
 
         setupNetworkMonitoring()
@@ -95,92 +98,87 @@ class DpiVpnService : VpnService(), SocketProtector {
     }
 
     private fun connectTunnel(profile: TunnelProfile) {
-        if (isRunning) {
-            disconnectTunnel("Switching profile to ${profile.name}")
-        }
+        activeConnectJob?.cancel()
+        activeConnectJob = serviceScope.launch {
+            lifecycleMutex.withLock {
+                startForeground(NOTIFICATION_ID, buildNotification("Validating ${profile.name}...", profile))
+                addLog(
+                    LogLevel.INFO,
+                    "VPN_SERVICE",
+                    "Starting tunnel pipeline for: ${profile.name} (${profile.protocol.displayName}, engine=${profile.preferredEngine.displayName})"
+                )
 
-        isRunning = true
-        startForeground(NOTIFICATION_ID, buildNotification("Initializing Tunnel...", profile))
-        addLog(LogLevel.INFO, "VPN_SERVICE", "Starting tunnel pipeline for: ${profile.name} (${profile.protocol.displayName})")
-
-        serviceScope.launch {
-            try {
                 val mtu = 1400
                 val enableIpv6 = false
                 val dnsServers = listOf("1.1.1.1", "8.8.8.8")
 
-                // Build Android TUN Interface
-                val builder = Builder()
-                    .setSession("DpiTunnel [${profile.protocol.shortName}]")
-                    .addAddress("10.8.0.2", 24)
-                    .addDnsServer(dnsServers[0])
-                    .addDnsServer(dnsServers[1])
-                    .addRoute("0.0.0.0", 0) // Route all IPv4
-                    .setMtu(mtu)
-
-                if (enableIpv6) {
-                    builder.addAddress("fd00:10:8::2", 64)
-                    builder.addRoute("::", 0)
-                }
-
-                // Prevent our own app traffic from looping into the TUN interface
-                try {
-                    builder.addDisallowedApplication(packageName)
-                } catch (e: Exception) {
-                    addLog(LogLevel.WARN, "VPN_SERVICE", "Could not set disallowed app: ${e.message}")
-                }
-
-                val pfd = builder.establish()
-                if (pfd == null) {
-                    val err = "Failed to establish TUN interface (VPN permission may be missing or revoked)"
-                    addLog(LogLevel.ERROR, "VPN_SERVICE", err)
-                    disconnectTunnel(err)
-                    return@launch
-                }
-                vpnInterface = pfd
-
-                addLog(LogLevel.INFO, "TUN", "Android TUN interface established on fd=${pfd.fd} (MTU=$mtu)")
-
-                // Delegate remote connection, real socket protection, and real packet forwarding to Orchestrator
                 val startResult = orchestrator.startTunnel(
                     profile = profile,
-                    tunFd = pfd,
                     mtu = mtu,
                     enableIpv6 = enableIpv6,
-                    dnsServers = dnsServers
+                    dnsServers = dnsServers,
+                    tunEstablisher = {
+                        establishTunInterface(profile, mtu, enableIpv6, dnsServers)
+                    }
                 )
 
                 if (startResult.isFailure) {
                     val ex = startResult.exceptionOrNull()
                     addLog(LogLevel.ERROR, "TUNNEL", "Tunnel failed to connect: ${ex?.message}")
-                    disconnectTunnel("Remote handshake failed: ${ex?.message}")
+                    stopForeground(STOP_FOREGROUND_REMOVE)
+                    stopSelf()
                 }
-
-            } catch (e: Exception) {
-                addLog(LogLevel.ERROR, "VPN_SERVICE", "Fatal error: ${e.message}")
-                disconnectTunnel("Error: ${e.message}")
             }
         }
     }
 
+    private fun establishTunInterface(
+        profile: TunnelProfile,
+        mtu: Int,
+        enableIpv6: Boolean,
+        dnsServers: List<String>
+    ): ParcelFileDescriptor? {
+        val builder = Builder()
+            .setSession("DpiTunnel [${profile.protocol.shortName}]")
+            .addAddress("10.8.0.2", 24)
+            .addDnsServer(dnsServers[0])
+            .addDnsServer(dnsServers[1])
+            .addRoute("0.0.0.0", 0)
+            .setMtu(mtu)
+
+        if (enableIpv6) {
+            builder.addAddress("fd00:10:8::2", 64)
+            builder.addRoute("::", 0)
+        }
+
+        try {
+            builder.addDisallowedApplication(packageName)
+        } catch (e: Exception) {
+            addLog(LogLevel.WARN, "VPN_SERVICE", "Could not set disallowed app: ${e.message}")
+        }
+
+        val pfd = builder.establish()
+        if (pfd != null) {
+            addLog(LogLevel.INFO, "TUN", "Android TUN established on fd=${pfd.fd} (MTU=$mtu)")
+        }
+        return pfd
+    }
+
     private fun disconnectTunnel(reason: String) {
-        isRunning = false
+        activeConnectJob?.cancel()
         serviceScope.launch {
-            orchestrator.stopTunnel(reason)
-            try {
-                vpnInterface?.close()
-            } catch (_: IOException) {}
-            vpnInterface = null
-
-            addLog(LogLevel.WARN, "VPN_SERVICE", "Tunnel terminated ($reason)")
-            _vpnState.value = _vpnState.value.copy(
-                status = VpnStatus.DISCONNECTED,
-                downloadSpeedBps = 0L,
-                uploadSpeedBps = 0L
-            )
-
-            stopForeground(STOP_FOREGROUND_REMOVE)
-            stopSelf()
+            lifecycleMutex.withLock {
+                orchestrator.stopTunnel(reason)
+                addLog(LogLevel.WARN, "VPN_SERVICE", "Tunnel terminated ($reason)")
+                _vpnState.value = _vpnState.value.copy(
+                    status = VpnStatus.DISCONNECTED,
+                    downloadSpeedBps = 0L,
+                    uploadSpeedBps = 0L,
+                    errorMessage = null
+                )
+                stopForeground(STOP_FOREGROUND_REMOVE)
+                stopSelf()
+            }
         }
     }
 
@@ -190,9 +188,18 @@ class DpiVpnService : VpnService(), SocketProtector {
     }
 
     override fun onDestroy() {
-        networkCallback?.let { connectivityManager?.unregisterNetworkCallback(it) }
+        activeConnectJob?.cancel()
+        networkCallback?.let {
+            try { connectivityManager?.unregisterNetworkCallback(it) } catch (_: Throwable) {}
+        }
+        runBlocking {
+            withTimeoutOrNull(2500L) {
+                try {
+                    orchestrator.stopTunnel("Service destroyed")
+                } catch (_: Throwable) {}
+            }
+        }
         orchestrator.release()
-        disconnectTunnel("Service destroyed")
         serviceJob.cancel()
         super.onDestroy()
     }

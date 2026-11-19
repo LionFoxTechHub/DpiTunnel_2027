@@ -105,7 +105,12 @@ class MainActivity : ComponentActivity() {
                                             .background(
                                                 when (vpnState.status) {
                                                     VpnStatus.CONNECTED -> NeonEmerald.copy(alpha = 0.2f)
-                                                    VpnStatus.CONNECTING, VpnStatus.TUNNELING -> NeonAmber.copy(alpha = 0.2f)
+                                                    VpnStatus.CONFIG_VALIDATION,
+                                                    VpnStatus.CORE_INITIALIZING,
+                                                    VpnStatus.CORE_RUNNING,
+                                                    VpnStatus.TUN_ESTABLISHING,
+                                                    VpnStatus.CONNECTIVITY_VERIFYING -> NeonAmber.copy(alpha = 0.2f)
+                                                    VpnStatus.ERROR -> NeonRed.copy(alpha = 0.2f)
                                                     else -> CyanNeon.copy(alpha = 0.15f)
                                                 },
                                                 RoundedCornerShape(10.dp)
@@ -114,7 +119,12 @@ class MainActivity : ComponentActivity() {
                                                 1.dp,
                                                 when (vpnState.status) {
                                                     VpnStatus.CONNECTED -> NeonEmerald
-                                                    VpnStatus.CONNECTING, VpnStatus.TUNNELING -> NeonAmber
+                                                    VpnStatus.CONFIG_VALIDATION,
+                                                    VpnStatus.CORE_INITIALIZING,
+                                                    VpnStatus.CORE_RUNNING,
+                                                    VpnStatus.TUN_ESTABLISHING,
+                                                    VpnStatus.CONNECTIVITY_VERIFYING -> NeonAmber
+                                                    VpnStatus.ERROR -> NeonRed
                                                     else -> CyanNeon
                                                 },
                                                 RoundedCornerShape(10.dp)
@@ -126,7 +136,12 @@ class MainActivity : ComponentActivity() {
                                             contentDescription = "Logo",
                                             tint = when (vpnState.status) {
                                                 VpnStatus.CONNECTED -> NeonEmerald
-                                                VpnStatus.CONNECTING, VpnStatus.TUNNELING -> NeonAmber
+                                                VpnStatus.CONFIG_VALIDATION,
+                                                VpnStatus.CORE_INITIALIZING,
+                                                VpnStatus.CORE_RUNNING,
+                                                VpnStatus.TUN_ESTABLISHING,
+                                                VpnStatus.CONNECTIVITY_VERIFYING -> NeonAmber
+                                                VpnStatus.ERROR -> NeonRed
                                                 else -> CyanNeon
                                             },
                                             modifier = Modifier.size(20.dp)
@@ -158,7 +173,12 @@ class MainActivity : ComponentActivity() {
                                             .background(
                                                 when (vpnState.status) {
                                                     VpnStatus.CONNECTED -> NeonEmerald.copy(alpha = 0.2f)
-                                                    VpnStatus.CONNECTING, VpnStatus.TUNNELING -> NeonAmber.copy(alpha = 0.2f)
+                                                    VpnStatus.CONFIG_VALIDATION,
+                                                    VpnStatus.CORE_INITIALIZING,
+                                                    VpnStatus.CORE_RUNNING,
+                                                    VpnStatus.TUN_ESTABLISHING,
+                                                    VpnStatus.CONNECTIVITY_VERIFYING -> NeonAmber.copy(alpha = 0.2f)
+                                                    VpnStatus.ERROR -> NeonRed.copy(alpha = 0.2f)
                                                     else -> Color(0xFF1E293B)
                                                 },
                                                 CircleShape
@@ -167,7 +187,12 @@ class MainActivity : ComponentActivity() {
                                                 1.dp,
                                                 when (vpnState.status) {
                                                     VpnStatus.CONNECTED -> NeonEmerald
-                                                    VpnStatus.CONNECTING, VpnStatus.TUNNELING -> NeonAmber
+                                                    VpnStatus.CONFIG_VALIDATION,
+                                                    VpnStatus.CORE_INITIALIZING,
+                                                    VpnStatus.CORE_RUNNING,
+                                                    VpnStatus.TUN_ESTABLISHING,
+                                                    VpnStatus.CONNECTIVITY_VERIFYING -> NeonAmber
+                                                    VpnStatus.ERROR -> NeonRed
                                                     else -> CyberCardBorder
                                                 },
                                                 CircleShape
@@ -184,7 +209,12 @@ class MainActivity : ComponentActivity() {
                                                     .background(
                                                         when (vpnState.status) {
                                                             VpnStatus.CONNECTED -> NeonEmerald
-                                                            VpnStatus.CONNECTING, VpnStatus.TUNNELING -> NeonAmber
+                                                            VpnStatus.CONFIG_VALIDATION,
+                                                            VpnStatus.CORE_INITIALIZING,
+                                                            VpnStatus.CORE_RUNNING,
+                                                            VpnStatus.TUN_ESTABLISHING,
+                                                            VpnStatus.CONNECTIVITY_VERIFYING -> NeonAmber
+                                                            VpnStatus.ERROR -> NeonRed
                                                             else -> TextMuted
                                                         },
                                                         CircleShape
@@ -193,14 +223,24 @@ class MainActivity : ComponentActivity() {
                                             Text(
                                                 text = when (vpnState.status) {
                                                     VpnStatus.CONNECTED -> "SECURE"
-                                                    VpnStatus.CONNECTING, VpnStatus.TUNNELING -> "LINKING"
+                                                    VpnStatus.CONFIG_VALIDATION,
+                                                    VpnStatus.CORE_INITIALIZING,
+                                                    VpnStatus.CORE_RUNNING,
+                                                    VpnStatus.TUN_ESTABLISHING,
+                                                    VpnStatus.CONNECTIVITY_VERIFYING -> "LINKING"
+                                                    VpnStatus.ERROR -> "ERROR"
                                                     else -> "OFFLINE"
                                                 },
                                                 fontSize = 10.sp,
                                                 fontWeight = FontWeight.Bold,
                                                 color = when (vpnState.status) {
                                                     VpnStatus.CONNECTED -> NeonEmerald
-                                                    VpnStatus.CONNECTING, VpnStatus.TUNNELING -> NeonAmber
+                                                    VpnStatus.CONFIG_VALIDATION,
+                                                    VpnStatus.CORE_INITIALIZING,
+                                                    VpnStatus.CORE_RUNNING,
+                                                    VpnStatus.TUN_ESTABLISHING,
+                                                    VpnStatus.CONNECTIVITY_VERIFYING -> NeonAmber
+                                                    VpnStatus.ERROR -> NeonRed
                                                     else -> TextMuted
                                                 }
                                             )

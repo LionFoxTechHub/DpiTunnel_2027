@@ -89,9 +89,9 @@ class HttpProxyEngine : TunnelEngine {
             val outStream = currentSocket.getOutputStream()
             val inStream = currentSocket.getInputStream()
 
-            // Build and inject HTTP payload
+            // Build and inject HTTP payload using structured segments
             _state.value = EngineState.Handshaking("Injecting HTTP Request Payload...")
-            val evaluatedPayload = PayloadBuilder.buildPayload(
+            val payloadSegments = PayloadBuilder.buildSegments(
                 template = tweak.httpPayload,
                 targetHost = host,
                 targetPort = port,
@@ -99,19 +99,12 @@ class HttpProxyEngine : TunnelEngine {
                 userAgent = tweak.customUserAgent
             )
 
-            // Write payload with fragmentation if enabled
-            val payloadSegments = PayloadBuilder.getPayloadSegments(evaluatedPayload)
+            // Write payload segments respecting explicit split boundaries
             for (segment in payloadSegments) {
-                if (tweak.tcpFragmentMode == TcpFragmentMode.SPLIT_AT_SNI && segment.size > 20) {
-                    val half = segment.size / 2
-                    outStream.write(segment, 0, half)
-                    outStream.flush()
+                outStream.write(segment.data)
+                outStream.flush()
+                if (segment.splitMarker == PayloadBuilder.SplitMarker.DELAYED) {
                     delay(tweak.fragmentDelayMs.coerceAtLeast(10L))
-                    outStream.write(segment, half, segment.size - half)
-                    outStream.flush()
-                } else {
-                    outStream.write(segment)
-                    outStream.flush()
                 }
                 trafficMonitor.recordUpload(segment.size.toLong())
             }

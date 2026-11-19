@@ -1,4 +1,19 @@
 import com.google.gms.googleservices.GoogleServicesPlugin.MissingGoogleServicesStrategy
+import java.io.ByteArrayOutputStream
+import java.util.zip.ZipEntry
+import java.util.zip.ZipFile
+import java.util.zip.ZipInputStream
+import java.util.zip.ZipOutputStream
+import org.gradle.api.artifacts.transform.InputArtifact
+import org.gradle.api.artifacts.transform.TransformAction
+import org.gradle.api.artifacts.transform.TransformOutputs
+import org.gradle.api.artifacts.transform.TransformParameters
+import org.gradle.api.artifacts.type.ArtifactTypeDefinition
+import org.gradle.api.attributes.Attribute
+import org.gradle.api.file.FileSystemLocation
+import org.gradle.api.provider.Provider
+import org.gradle.api.tasks.PathSensitive
+import org.gradle.api.tasks.PathSensitivity
 
 plugins {
   alias(libs.plugins.android.application)
@@ -63,10 +78,23 @@ android {
     compose = true
     buildConfig = true
   }
-  testOptions { unitTests { isIncludeAndroidResources = true } }
+  testOptions {
+    unitTests {
+      isIncludeAndroidResources = true
+      isReturnDefaultValues = true
+    }
+  }
   dependenciesInfo {
     includeInApk = false
     includeInBundle = true
+  }
+  splits {
+    abi {
+      isEnable = true
+      reset()
+      include("armeabi-v7a", "arm64-v8a", "x86", "x86_64")
+      isUniversalApk = true
+    }
   }
 }
 
@@ -124,12 +152,14 @@ dependencies {
   implementation(libs.logging.interceptor)
   implementation(libs.moshi.kotlin)
   implementation(libs.okhttp)
-  // implementation(libs.play.services.location)
   implementation(libs.retrofit)
+  implementation(libs.libbox)
+  implementation(libs.libxray)
   testImplementation(libs.androidx.compose.ui.test.junit4)
   testImplementation(libs.androidx.core)
   testImplementation(libs.androidx.junit)
   testImplementation(libs.junit)
+  testImplementation("org.json:json:20240303")
   testImplementation(libs.kotlinx.coroutines.test)
   testImplementation(libs.robolectric)
   androidTestImplementation(platform(libs.androidx.compose.bom))
@@ -141,4 +171,89 @@ dependencies {
   debugImplementation(libs.androidx.compose.ui.tooling)
   "ksp"(libs.androidx.room.compiler)
   "ksp"(libs.moshi.kotlin.codegen)
+}
+
+abstract class StripGomobileGoClassesTransform : TransformAction<TransformParameters.None> {
+  @get:InputArtifact
+  @get:PathSensitive(PathSensitivity.NAME_ONLY)
+  abstract val inputArtifact: Provider<FileSystemLocation>
+
+  override fun transform(outputs: TransformOutputs) {
+    val input = inputArtifact.get().asFile
+    if (!input.name.endsWith(".aar") || !aarContainsGoPackage(input)) {
+      outputs.file(input)
+      return
+    }
+
+    val outputFile = outputs.file(input.name)
+    ZipFile(input).use { zipIn ->
+      ZipOutputStream(outputFile.outputStream().buffered()).use { zipOut ->
+        val entries = zipIn.entries()
+        while (entries.hasMoreElements()) {
+          val entry = entries.nextElement()
+          val outEntry = ZipEntry(entry.name)
+          zipOut.putNextEntry(outEntry)
+          if (entry.name == "classes.jar") {
+            val strippedJar = stripGoClassesFromJar(zipIn.getInputStream(entry).readBytes())
+            zipOut.write(strippedJar)
+          } else if (!entry.isDirectory) {
+            zipIn.getInputStream(entry).copyTo(zipOut)
+          }
+          zipOut.closeEntry()
+        }
+      }
+    }
+  }
+
+  private fun aarContainsGoPackage(aar: java.io.File): Boolean {
+    ZipFile(aar).use { zip ->
+      val classesEntry = zip.getEntry("classes.jar") ?: return false
+      ZipInputStream(zip.getInputStream(classesEntry).buffered()).use { jis ->
+        var e = jis.nextEntry
+        while (e != null) {
+          if (e.name.startsWith("go/")) return true
+          e = jis.nextEntry
+        }
+      }
+    }
+    return false
+  }
+
+  private fun stripGoClassesFromJar(jarBytes: ByteArray): ByteArray {
+    val baos = ByteArrayOutputStream()
+    ZipInputStream(jarBytes.inputStream()).use { jis ->
+      ZipOutputStream(baos).use { jos ->
+        var e = jis.nextEntry
+        while (e != null) {
+          if (!e.name.startsWith("go/")) {
+            jos.putNextEntry(ZipEntry(e.name))
+            if (!e.isDirectory) {
+              jis.copyTo(jos)
+            }
+            jos.closeEntry()
+          }
+          e = jis.nextEntry
+        }
+      }
+    }
+    return baos.toByteArray()
+  }
+}
+
+val gomobileStripped = Attribute.of("com.example.gomobileStripped", Boolean::class.javaObjectType)
+
+dependencies {
+  artifactTypes.maybeCreate("aar").attributes.attribute(gomobileStripped, false)
+  registerTransform(StripGomobileGoClassesTransform::class.java) {
+    from.attribute(ArtifactTypeDefinition.ARTIFACT_TYPE_ATTRIBUTE, "aar")
+        .attribute(gomobileStripped, false)
+    to.attribute(ArtifactTypeDefinition.ARTIFACT_TYPE_ATTRIBUTE, "aar")
+        .attribute(gomobileStripped, true)
+  }
+}
+
+configurations.configureEach {
+  if (name.endsWith("CompileClasspath") || name.endsWith("RuntimeClasspath")) {
+    attributes.attribute(gomobileStripped, true)
+  }
 }

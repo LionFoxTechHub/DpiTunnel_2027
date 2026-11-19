@@ -78,8 +78,12 @@ fun HeroDial(
     val ringColor by animateColorAsState(
         targetValue = when (vpnState.status) {
             VpnStatus.CONNECTED -> NeonEmerald
-            VpnStatus.CONNECTING, VpnStatus.TUNNELING -> NeonAmber
-            VpnStatus.STOPPING -> NeonRed
+            VpnStatus.CONFIG_VALIDATION,
+            VpnStatus.CORE_INITIALIZING,
+            VpnStatus.CORE_RUNNING,
+            VpnStatus.TUN_ESTABLISHING,
+            VpnStatus.CONNECTIVITY_VERIFYING -> NeonAmber
+            VpnStatus.DISCONNECTING, VpnStatus.ERROR -> NeonRed
             VpnStatus.DISCONNECTED -> CyanNeon
         },
         label = "ring_color"
@@ -159,7 +163,11 @@ fun HeroDial(
                                 modifier = Modifier.size(42.dp)
                             )
                         }
-                        VpnStatus.CONNECTING, VpnStatus.TUNNELING -> {
+                        VpnStatus.CONFIG_VALIDATION,
+                        VpnStatus.CORE_INITIALIZING,
+                        VpnStatus.CORE_RUNNING,
+                        VpnStatus.TUN_ESTABLISHING,
+                        VpnStatus.CONNECTIVITY_VERIFYING -> {
                             Icon(
                                 imageVector = Icons.Default.Sync,
                                 contentDescription = "Connecting",
@@ -169,10 +177,10 @@ fun HeroDial(
                                     .rotate(rotation)
                             )
                         }
-                        VpnStatus.STOPPING -> {
+                        VpnStatus.DISCONNECTING, VpnStatus.ERROR -> {
                             Icon(
                                 imageVector = Icons.Default.PowerSettingsNew,
-                                contentDescription = "Stopping",
+                                contentDescription = if (vpnState.status == VpnStatus.ERROR) "Error" else "Stopping",
                                 tint = NeonRed,
                                 modifier = Modifier.size(42.dp)
                             )
@@ -192,9 +200,13 @@ fun HeroDial(
                     Text(
                         text = when (vpnState.status) {
                             VpnStatus.CONNECTED -> "CONNECTED"
-                            VpnStatus.CONNECTING -> "RESOLVING..."
-                            VpnStatus.TUNNELING -> "OBFUSCATING"
-                            VpnStatus.STOPPING -> "DISCONNECTING"
+                            VpnStatus.CONFIG_VALIDATION -> "VALIDATING..."
+                            VpnStatus.CORE_INITIALIZING -> "INIT CORE..."
+                            VpnStatus.CORE_RUNNING -> "CORE READY"
+                            VpnStatus.TUN_ESTABLISHING -> "TUN SETUP..."
+                            VpnStatus.CONNECTIVITY_VERIFYING -> "VERIFYING..."
+                            VpnStatus.DISCONNECTING -> "DISCONNECTING"
+                            VpnStatus.ERROR -> "ERROR"
                             VpnStatus.DISCONNECTED -> "START VPN"
                         },
                         fontSize = 11.sp,

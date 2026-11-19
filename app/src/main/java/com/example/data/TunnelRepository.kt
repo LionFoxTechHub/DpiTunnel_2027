@@ -20,7 +20,7 @@ object TunnelRepository {
     private val defaultProfiles = listOf(
         TunnelProfile(
             id = "cfg-vless-de",
-            name = "Frankfurt VLESS Reality",
+            name = "Frankfurt VLESS TLS",
             protocol = TunnelProtocol.VLESS,
             serverHost = "de-fra.dpitunnel.net",
             serverPort = 443,
@@ -325,6 +325,10 @@ object TunnelRepository {
                 val protocol = TunnelProtocol.entries.firstOrNull { it.name.equals(protocolName, true) }
                     ?: TunnelProtocol.VLESS
 
+                val engineName = json.optString("preferredEngine", CoreEngineType.AUTO.name)
+                val preferredEngine = CoreEngineType.entries.firstOrNull { it.name.equals(engineName, true) }
+                    ?: CoreEngineType.AUTO
+
                 return TunnelProfile(
                     id = json.optString("id", UUID.randomUUID().toString()),
                     name = json.optString("name", "Imported ${protocol.displayName}"),
@@ -334,6 +338,7 @@ object TunnelRepository {
                     uuidOrPassword = json.optString("uuidOrPassword", ""),
                     countryCode = json.optString("countryCode", "US"),
                     cityName = json.optString("cityName", "Custom"),
+                    preferredEngine = preferredEngine,
                     isCustom = true,
                     dpiTweak = DpiTweakSettings(
                         sniHost = json.optString("sniHost", "cloudflare.com"),
@@ -397,6 +402,7 @@ object TunnelRepository {
         json.put("tcpFragmentMode", profile.dpiTweak.tcpFragmentMode.name)
         json.put("fakeHttpRequest", profile.dpiTweak.fakeHttpRequest)
         json.put("httpPayload", profile.dpiTweak.httpPayload)
+        json.put("preferredEngine", profile.preferredEngine.name)
         return json.toString(2)
     }
 }

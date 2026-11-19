@@ -43,6 +43,18 @@
             </intent-filter>
         </service>
 
+        <!-- Process-isolated sing-box native core worker (loads libbox.so only) -->
+        <service
+            android:name=".service.SingBoxCoreService"
+            android:process=":singbox"
+            android:exported="false" />
+
+        <!-- Process-isolated Xray-core native worker (loads libgojni.so only) -->
+        <service
+            android:name=".service.XrayCoreService"
+            android:process=":xray"
+            android:exported="false" />
+
     </application>
 
 </manifest>

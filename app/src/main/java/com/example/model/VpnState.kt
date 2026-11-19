@@ -1,31 +1,42 @@
 package com.example.model
 
-enum class VpnStatus {
-    DISCONNECTED,
-    CONNECTING,
-    TUNNELING,
-    CONNECTED,
-    STOPPING
+enum class VpnStatus(val displayLabel: String) {
+    CONFIG_VALIDATION("Validating Config"),
+    CORE_INITIALIZING("Initializing Core"),
+    CORE_RUNNING("Core Running"),
+    TUN_ESTABLISHING("Establishing TUN"),
+    CONNECTIVITY_VERIFYING("Verifying Tunnel"),
+    CONNECTED("Connected"),
+    DISCONNECTING("Disconnecting"),
+    DISCONNECTED("Disconnected"),
+    ERROR("Error")
 }
 
 data class VpnState(
     val status: VpnStatus = VpnStatus.DISCONNECTED,
     val activeProfile: TunnelProfile? = null,
+    val activeEngineName: String? = null,
     val connectedDurationSeconds: Long = 0L,
     val downloadSpeedBps: Long = 0L,
     val uploadSpeedBps: Long = 0L,
     val totalDownloadBytes: Long = 0L,
     val totalUploadBytes: Long = 0L,
     val currentVirtualIp: String = "10.8.0.2",
-    val remoteServerIp: String = "185.199.108.153",
+    val remoteServerIp: String = "",
     val activeObfuscationSummary: String = "Inactive",
+    val errorMessage: String? = null,
     val logs: List<LogEntry> = emptyList()
 ) {
     val isConnected: Boolean
         get() = status == VpnStatus.CONNECTED
 
     val isTransitioning: Boolean
-        get() = status == VpnStatus.CONNECTING || status == VpnStatus.TUNNELING || status == VpnStatus.STOPPING
+        get() = status == VpnStatus.CONFIG_VALIDATION ||
+            status == VpnStatus.CORE_INITIALIZING ||
+            status == VpnStatus.CORE_RUNNING ||
+            status == VpnStatus.TUN_ESTABLISHING ||
+            status == VpnStatus.CONNECTIVITY_VERIFYING ||
+            status == VpnStatus.DISCONNECTING
 
     val formattedDuration: String
         get() {

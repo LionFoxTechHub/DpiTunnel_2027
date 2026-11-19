@@ -2,6 +2,12 @@ package com.example.model
 
 import java.util.UUID
 
+enum class CoreEngineType(val displayName: String) {
+    AUTO("Auto (Protocol Default)"),
+    SING_BOX("sing-box Core"),
+    XRAY_CORE("Xray-core")
+}
+
 data class TunnelProfile(
     val id: String = UUID.randomUUID().toString(),
     val name: String,
@@ -13,6 +19,7 @@ data class TunnelProfile(
     val cityName: String = "Global",
     val pingMs: Int = -1,
     val dpiTweak: DpiTweakSettings = DpiTweakSettings(),
+    val preferredEngine: CoreEngineType = CoreEngineType.AUTO,
     val isCustom: Boolean = false,
     val isFavorite: Boolean = false
 ) {

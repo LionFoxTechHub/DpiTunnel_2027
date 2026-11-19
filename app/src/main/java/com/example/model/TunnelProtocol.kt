@@ -5,6 +5,7 @@ import com.example.ui.theme.*
 
 enum class ProtocolPhaseStatus(val label: String, val isPhase1Active: Boolean) {
     IMPLEMENTED_PHASE_1("Active (Phase 1)", true),
+    IMPLEMENTED_PHASE_2("Active (Phase 2 Core)", true),
     PLANNED_PHASE_2("Planned (Phase 2 Core)", false),
     REQUIRES_KERNEL("Kernel WireGuard Required", false)
 }
@@ -88,7 +89,7 @@ enum class TunnelProtocol(
         defaultObfuscation = "Reality + TLS Splitting",
         badgeColor = ColorVless,
         description = "Lightweight stateless proxy protocol with TLS Reality camouflage",
-        phaseStatus = ProtocolPhaseStatus.PLANNED_PHASE_2
+        phaseStatus = ProtocolPhaseStatus.IMPLEMENTED_PHASE_2
     ),
     VMESS(
         displayName = "VMess",
@@ -97,7 +98,7 @@ enum class TunnelProtocol(
         defaultObfuscation = "WebSocket + AEAD Header",
         badgeColor = ColorVmess,
         description = "Encrypted transport protocol for V2Ray ecosystem with payload padding",
-        phaseStatus = ProtocolPhaseStatus.PLANNED_PHASE_2
+        phaseStatus = ProtocolPhaseStatus.IMPLEMENTED_PHASE_2
     ),
     SHADOWSOCKS(
         displayName = "Shadowsocks",
@@ -106,7 +107,7 @@ enum class TunnelProtocol(
         defaultObfuscation = "Simple-Obfs (HTTP/TLS)",
         badgeColor = ColorShadowsocks,
         description = "High-performance encrypted SOCKS5 proxy with custom stream ciphers",
-        phaseStatus = ProtocolPhaseStatus.PLANNED_PHASE_2
+        phaseStatus = ProtocolPhaseStatus.IMPLEMENTED_PHASE_2
     ),
     TROJAN(
         displayName = "Trojan",
@@ -115,7 +116,7 @@ enum class TunnelProtocol(
         defaultObfuscation = "HTTPS Camouflage",
         badgeColor = ColorTrojan,
         description = "Unidentifiable mechanism that imitates HTTPS traffic with valid TLS certificate",
-        phaseStatus = ProtocolPhaseStatus.PLANNED_PHASE_2
+        phaseStatus = ProtocolPhaseStatus.IMPLEMENTED_PHASE_2
     ),
     V2RAY(
         displayName = "V2Ray",
@@ -124,7 +125,7 @@ enum class TunnelProtocol(
         defaultObfuscation = "mKCP + Seed Obfs",
         badgeColor = ColorV2Ray,
         description = "Comprehensive multi-protocol proxy core with multiplexing and fake DNS",
-        phaseStatus = ProtocolPhaseStatus.PLANNED_PHASE_2
+        phaseStatus = ProtocolPhaseStatus.IMPLEMENTED_PHASE_2
     ),
     WIREGUARD(
         displayName = "WireGuard",
